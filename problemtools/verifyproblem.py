@@ -517,8 +517,44 @@ class TestCaseGroup(ProblemAspect):
             if child.matches_filter(args.data_filter):
                 child.check(args)
 
+        self._check_includes()
+
         return self._check_res
 
+    def _check_includes(self):
+        test_case_groups = [x for x in self._items if isinstance(x, TestCaseGroup)]
+        groups_by_path = {g._datadir: g for g in test_case_groups}
+        included_groups = {}
+        test_cases = {}
+        for group in test_case_groups:
+            included_groups[group] = set()
+            test_cases[group] = [x for x in group._items if isinstance(x, TestCase)]
+            for test_case in test_cases[group]:
+                if os.path.islink(test_case.infile):
+                    group_path = os.path.dirname(os.path.realpath(test_case.infile))
+                    if group_path in groups_by_path:
+                        included_groups[group].add(groups_by_path[group_path])
+
+        got_error = False
+        def catch_error(*args, **kwargs):
+            nonlocal got_error
+            got_error = True
+
+        for group, includes in included_groups.items():
+            for test_case in test_cases[group]:
+                if not os.path.islink(test_case.infile):
+                    assert test_case.testcasegroup == group
+                    test_case.error = catch_error
+
+                    for include in includes:
+                        test_case.testcasegroup = include
+                        got_error = False
+                        self._problem.input_format_validators.validate(test_case)
+                        if not got_error:
+                            self.warning("%s inside %s validates %s" % (include, group, test_case))
+
+                    test_case.testcasegroup = group
+                    test_case.error = ProblemAspect.error
 
     def run_submission(self, sub, args, timelim_low, timelim_high):
         self.info('Running on %s' % self)
